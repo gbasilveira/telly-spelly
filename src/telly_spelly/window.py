@@ -3,11 +3,11 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                            QProgressBar, QMessageBox, QFrame, QStackedWidget)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QKeySequence, QIcon
-from settings import Settings
-from volume_meter import VolumeMeter
-from mic_test import MicTestDialog
-from recorder import AudioRecorder
-from transcriber import WhisperTranscriber
+from .settings import Settings
+from .volume_meter import VolumeMeter
+from .mic_test import MicTestDialog
+from .recorder import AudioRecorder
+from .transcriber import WhisperTranscriber
 import numpy as np
 import logging
 

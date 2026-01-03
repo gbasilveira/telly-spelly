@@ -1,25 +1,99 @@
 import sys
+
+# Initialize D-Bus GLib main loop BEFORE importing Qt
+# This is required for proper D-Bus/Qt integration
+from dbus.mainloop.glib import DBusGMainLoop
+DBusGMainLoop(set_as_default=True)
+
 from PyQt6.QtWidgets import (QApplication, QMessageBox, QSystemTrayIcon, QMenu)
 from PyQt6.QtCore import Qt, QTimer, QCoreApplication
 from PyQt6.QtGui import QIcon, QAction
 import logging
-from settings_window import SettingsWindow
-from progress_window import ProgressWindow
-from processing_window import ProcessingWindow
-from recorder import AudioRecorder
-from transcriber import WhisperTranscriber
-from loading_window import LoadingWindow
+from .settings_window import SettingsWindow
+from .progress_window import ProgressWindow
+from .processing_window import ProcessingWindow
+from .recorder import AudioRecorder
+from .transcriber import WhisperTranscriber
 from PyQt6.QtCore import pyqtSignal
 import warnings
 import ctypes
 import os
-from shortcuts import GlobalShortcuts
-from settings import Settings
+from .shortcuts import GlobalShortcuts
+from .settings import Settings
+from .install import install_silent
+from . import gpu
 # from mic_debug import MicDebugWindow
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup logging with systemd journal support
+class JournalHandler(logging.Handler):
+    """Custom journal handler that writes to systemd journal"""
+
+    def __init__(self):
+        super().__init__()
+        self.level = logging.INFO
+
+    def emit(self, record):
+        try:
+            import sys
+            # Format message
+            msg = self.format(record)
+
+            # Write to stdout which systemd captures
+            # Add prefix for systemd to categorize
+            prefix = ""
+            if record.levelno >= logging.ERROR:
+                prefix = "<3>"  # Error
+            elif record.levelno >= logging.WARNING:
+                prefix = "<4>"  # Warning
+            elif record.levelno >= logging.INFO:
+                prefix = "<6>"  # Info
+            else:
+                prefix = "<7>"  # Debug
+
+            # Write to stdout with systemd priority prefix
+            sys.stdout.write(f"{prefix}telly-spelly: {msg}\n")
+            sys.stdout.flush()
+
+        except Exception:
+            self.handleError(record)
+
+def setup_logging():
+    """Setup logging that works well with systemd"""
+    import logging
+    import sys
+
+    # Check if we're running under systemd
+    running_under_systemd = 'INVOCATION_ID' in os.environ or 'JOURNAL_STREAM' in os.environ
+
+    if running_under_systemd:
+        # Use systemd-friendly logging
+        journal_handler = JournalHandler()
+        journal_handler.setLevel(logging.INFO)
+
+        formatter = logging.Formatter('%(message)s')
+        journal_handler.setFormatter(formatter)
+
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        root_logger.addHandler(journal_handler)
+
+        # Also keep stderr for errors
+        error_handler = logging.StreamHandler(sys.stderr)
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(logging.Formatter('ERROR: %(name)s: %(message)s'))
+        root_logger.addHandler(error_handler)
+
+    else:
+        # Regular console logging for development
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(name)s: %(levelname)s: %(message)s',
+            stream=sys.stderr
+        )
+
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
 
 # Suppress ALSA error messages
 try:
@@ -40,7 +114,7 @@ except:
     warnings.warn("Failed to suppress ALSA warnings", RuntimeWarning)
 
 def check_dependencies():
-    required_packages = ['whisper', 'pyaudio', 'keyboard']
+    required_packages = ['whisper', 'pyaudio']
     missing_packages = []
     
     for package in required_packages:
@@ -89,6 +163,7 @@ class TrayRecorder(QSystemTrayIcon):
         self.shortcuts = GlobalShortcuts()
         self.shortcuts.start_recording_triggered.connect(self.start_recording)
         self.shortcuts.stop_recording_triggered.connect(self.stop_recording)
+        self.shortcuts.toggle_recording_triggered.connect(self.toggle_recording)
 
     def initialize(self):
         """Initialize the tray recorder after showing loading window"""
@@ -103,9 +178,15 @@ class TrayRecorder(QSystemTrayIcon):
         QApplication.instance().setWindowIcon(self.app_icon)
         self.setIcon(self.app_icon)
         
-        # Use app icon for normal state and theme icon for recording
+        # Use app icon for normal state and red recording icon for recording
         self.normal_icon = self.app_icon
-        self.recording_icon = QIcon.fromTheme("media-playback-stop")
+        self.recording_icon = QIcon.fromTheme("media-record")
+        if self.recording_icon.isNull():
+            # Fallback to audio-input-microphone if media-record not available
+            self.recording_icon = QIcon.fromTheme("audio-input-microphone")
+        if self.recording_icon.isNull():
+            # Last resort: use the app icon
+            self.recording_icon = self.app_icon
         
         # Create menu
         self.setup_menu()
@@ -185,28 +266,21 @@ class TrayRecorder(QSystemTrayIcon):
 
     def stop_recording(self):
         """Handle stopping the recording and starting processing"""
+        logger.info(f"TrayRecorder: stop_recording called, recording={self.recording}")
         if not self.recording:
             return
-        
+
         logger.info("TrayRecorder: Stopping recording")
         self.toggle_recording()  # This is now safe since toggle_recording handles everything
 
     def toggle_settings(self):
         if not self.settings_window:
-            self.settings_window = SettingsWindow()
-            self.settings_window.shortcuts_changed.connect(self.update_shortcuts)
-        
+            self.settings_window = SettingsWindow(transcriber=self.transcriber)
+
         if self.settings_window.isVisible():
             self.settings_window.hide()
         else:
             self.settings_window.show()
-            
-    def update_shortcuts(self, start_key, stop_key):
-        """Update global shortcuts"""
-        if self.shortcuts.setup_shortcuts(start_key, stop_key):
-            self.showMessage("Shortcuts Updated", 
-                           f"Start: {start_key}\nStop: {stop_key}",
-                           self.normal_icon)
 
     def on_activate(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:  # Left click
@@ -293,12 +367,8 @@ class TrayRecorder(QSystemTrayIcon):
 
     def start_recording(self):
         """Start a new recording"""
+        logger.info("TrayRecorder: start_recording called")
         if not self.recording:
-            self.toggle_recording()
-            
-    def stop_recording(self):
-        """Stop current recording"""
-        if self.recording:
             self.toggle_recording()
 
     def toggle_debug_window(self):
@@ -313,44 +383,133 @@ class TrayRecorder(QSystemTrayIcon):
 def setup_application_metadata():
     QCoreApplication.setApplicationName("Telly Spelly")
     QCoreApplication.setApplicationVersion("1.0")
-    QCoreApplication.setOrganizationName("KDE")
-    QCoreApplication.setOrganizationDomain("kde.org")
+    QCoreApplication.setOrganizationName("Telly Spelly")
+    QCoreApplication.setOrganizationDomain("tellyspelly.org")
+
+def check_already_running():
+    """Check if another instance is already running via D-Bus"""
+    try:
+        import dbus
+        from .desktop_env import get_dbus_service_name
+        bus = dbus.SessionBus()
+        dbus_service = get_dbus_service_name()
+        # Try to get the existing service
+        proxy = bus.get_object(dbus_service, '/TellySpelly')
+        # If we get here, the service exists - another instance is running
+        return True
+    except dbus.DBusException:
+        # Service doesn't exist, no other instance running
+        return False
+    except Exception:
+        return False
+
+def send_notification(title, message, timeout_ms=20000, replaces_id=0):
+    """Send a desktop notification via D-Bus"""
+    try:
+        import dbus
+        bus = dbus.SessionBus()
+        notify = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
+        iface = dbus.Interface(notify, 'org.freedesktop.Notifications')
+        nid = iface.Notify('Telly Spelly', dbus.UInt32(replaces_id), 'telly-spelly', title, message, [], {}, timeout_ms)
+        return int(nid)
+    except Exception as e:
+        logger.warning(f"Could not send notification: {e}")
+        return 0
+
+def close_notification(notification_id):
+    """Close a notification by ID"""
+    if not notification_id:
+        return
+    try:
+        import dbus
+        bus = dbus.SessionBus()
+        notify = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
+        iface = dbus.Interface(notify, 'org.freedesktop.Notifications')
+        iface.CloseNotification(dbus.UInt32(notification_id))
+    except Exception as e:
+        logger.debug(f"Could not close notification: {e}")
 
 def main():
     try:
         app = QApplication(sys.argv)
         setup_application_metadata()
-        
-        # Show loading window first
-        loading_window = LoadingWindow()
-        loading_window.show()
-        app.processEvents()  # Force update of UI
-        loading_window.set_status("Checking system requirements...")
-        app.processEvents()  # Force update of UI
-        
+
+        # Check if already running
+        if check_already_running():
+            send_notification('Telly Spelly', 'Already running. Check your system tray.', 3000)
+            return 0
+
+        # Auto-install desktop integration on first run
+        if install_silent():
+            logger.info("Desktop integration installed automatically")
+
+        # Detect GPU and configure available models on every start
+        settings = Settings()
+        force_cpu = settings.get_force_cpu()
+
+        # Always check GPU availability (it may have changed since last run)
+        if force_cpu:
+            config = gpu.detect_and_configure(force_cpu=True)
+        else:
+            config = gpu.detect_and_configure()
+
+        # Check if hardware situation changed
+        previous_gpu_memory = settings.get_gpu_memory()
+        current_gpu_memory = config['gpu_memory_gb']
+
+        # GPU became unavailable (was available, now not)
+        if previous_gpu_memory is not None and current_gpu_memory is None and not force_cpu:
+            logger.warning("GPU no longer available, switching to CPU mode")
+        # GPU became available (was not available, now is)
+        elif previous_gpu_memory is None and current_gpu_memory is not None and not force_cpu:
+            logger.info(f"GPU now available: {current_gpu_memory:.1f}GB VRAM")
+
+        # Update settings
+        settings.set_gpu_memory(config['gpu_memory_gb'])
+        settings.set_available_models(config['available_models'])
+
+        # Adjust model if current one is no longer available
+        current_model = settings.get('model', None)
+        if current_model is None or current_model not in config['available_models']:
+            settings.set('model', config['default_model'])
+            logger.info(f"Model set to: {config['default_model']}")
+
+        settings.set_hardware_detected(True)
+        logger.info(f"Hardware config: GPU={config['gpu_memory_gb']}GB, Models={config['available_models']}")
+
+        # Send startup notification (0 = no expiry, will be replaced when ready)
+        startup_notification_id = send_notification('Telly Spelly', 'Starting up...', 0)
+
         # Check if system tray is available
         if not TrayRecorder.isSystemTrayAvailable():
-            QMessageBox.critical(None, "Error", 
-                "System tray is not available. Please ensure your desktop environment supports system tray icons.")
+            close_notification(startup_notification_id)
+            send_notification('Telly Spelly', 'Error: System tray not available.', 5000)
             return 1
-        
+
         # Create tray icon but don't initialize yet
         tray = TrayRecorder()
-        
-        # Connect loading window to tray initialization
-        tray.initialization_complete.connect(loading_window.close)
-        
-        # Check dependencies in background
-        loading_window.set_status("Checking dependencies...")
-        app.processEvents()  # Force update of UI
+
+        # Replace startup notification with ready notification when initialization completes
+        def on_init_complete():
+            # Check if shortcut was registered successfully
+            if tray.shortcuts and tray.shortcuts.registered:
+                msg = 'Ready! Press Ctrl+Alt+R to toggle recording.'
+            else:
+                msg = 'Ready! Configure shortcut in System Settings → Shortcuts → Telly Spelly'
+            send_notification('Telly Spelly', msg, 8000, startup_notification_id)
+
+        tray.initialization_complete.connect(on_init_complete)
+
+        # Check dependencies
         if not check_dependencies():
+            close_notification(startup_notification_id)
             return 1
-        
+
         # Ensure the application doesn't quit when last window is closed
         app.setQuitOnLastWindowClosed(False)
-        
+
         # Initialize tray in background
-        QTimer.singleShot(100, lambda: initialize_tray(tray, loading_window, app))
+        QTimer.singleShot(100, lambda: initialize_tray(tray, startup_notification_id, app))
         
         return app.exec()
         
@@ -360,46 +519,36 @@ def main():
             f"Failed to start application: {str(e)}")
         return 1
 
-def initialize_tray(tray, loading_window, app):
+def initialize_tray(tray, startup_notification_id, app):
     try:
         # Initialize basic tray setup
-        loading_window.set_status("Initializing application...")
-        app.processEvents()
         tray.initialize()
-        
+
         # Initialize recorder
-        loading_window.set_status("Initializing audio system...")
-        app.processEvents()
         tray.recorder = AudioRecorder()
-        
+
         # Initialize transcriber
-        loading_window.set_status("Loading Whisper model...")
-        app.processEvents()
         tray.transcriber = WhisperTranscriber()
-        
+
         # Connect signals
-        loading_window.set_status("Setting up signal handlers...")
-        app.processEvents()
         tray.recorder.volume_updated.connect(tray.update_volume_meter)
         tray.recorder.recording_finished.connect(tray.handle_recording_finished)
         tray.recorder.recording_error.connect(tray.handle_recording_error)
-        
+
         tray.transcriber.transcription_progress.connect(tray.update_processing_status)
         tray.transcriber.transcription_finished.connect(tray.handle_transcription_finished)
         tray.transcriber.transcription_error.connect(tray.handle_transcription_error)
-        
+
         # Make tray visible
-        loading_window.set_status("Starting application...")
-        app.processEvents()
         tray.setVisible(True)
-        
+
         # Signal completion
         tray.initialization_complete.emit()
-        
+
     except Exception as e:
         logger.error(f"Initialization failed: {e}")
-        QMessageBox.critical(None, "Error", f"Failed to initialize application: {str(e)}")
-        loading_window.close()
+        close_notification(startup_notification_id)
+        send_notification('Telly Spelly', f'Failed to start: {str(e)}', 10000)
 
 if __name__ == "__main__":
     sys.exit(main()) 

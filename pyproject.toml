@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "telly-spelly"
+version = "0.1.3"
+description = "Voice-to-text transcription for KDE Plasma and XFCE4 using OpenAI Whisper"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Konrad", email = "konrad@example.com" },
+]
+keywords = ["whisper", "speech-to-text", "voice", "transcription", "kde", "plasma", "xfce", "xfce4"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+    "PyQt6",
+    "numpy",
+    "pyaudio",
+    "scipy",
+    "openai-whisper",
+    "dbus-python",
+]
+
+[project.urls]
+Homepage = "https://github.com/Dronakurl/telly-spelly"
+Repository = "https://github.com/Dronakurl/telly-spelly"
+Issues = "https://github.com/Dronakurl/telly-spelly/issues"
+
+[project.scripts]
+telly-spelly = "telly_spelly.main:main"
+telly-spelly-install = "telly_spelly.install:main"
+telly-spelly-uninstall = "telly_spelly.install:uninstall"
+
+[project.gui-scripts]
+telly-spelly-gui = "telly_spelly.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/telly_spelly"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"src/telly_spelly/telly-spelly.png" = "share/icons/hicolor/128x128/apps/telly-spelly.png"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/README.md",
+    "/LICENSE",
+]

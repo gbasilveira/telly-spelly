@@ -5,7 +5,7 @@ import tempfile
 import os
 import logging
 import numpy as np
-from settings import Settings
+from .settings import Settings
 from scipy import signal
 
 logger = logging.getLogger(__name__)

@@ -1,4 +1,6 @@
 PyQt6
 numpy
 pyaudio
-scipy 
+scipy
+openai-whisper
+dbus-python

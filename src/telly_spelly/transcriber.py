@@ -3,32 +3,33 @@ import whisper
 import os
 import logging
 import time
-from settings import Settings
+from .settings import Settings
 logger = logging.getLogger(__name__)
 
 class TranscriptionWorker(QThread):
     finished = pyqtSignal(str)
     progress = pyqtSignal(str)
     error = pyqtSignal(str)
-    
-    def __init__(self, model, audio_file):
+
+    def __init__(self, model, audio_file, language=None):
         super().__init__()
         self.model = model
         self.audio_file = audio_file
-        
+        self.language = language
+
     def run(self):
         try:
             if not os.path.exists(self.audio_file):
                 raise FileNotFoundError(f"Audio file not found: {self.audio_file}")
-                
+
             self.progress.emit("Loading audio file...")
-            
+
             # Load and transcribe
             self.progress.emit("Processing audio with Whisper...")
             result = self.model.transcribe(
                 self.audio_file,
                 fp16=False,
-                language='en'
+                language=self.language
             )
             
             text = result["text"].strip()
@@ -69,15 +70,33 @@ class WhisperTranscriber(QObject):
         try:
             settings = Settings()
             model_name = settings.get('model', 'turbo')
-            logger.info(f"Loading Whisper model: {model_name}")
-            
+
+            # Determine device - use GPU if available and not force CPU mode
+            force_cpu = settings.get_force_cpu()
+
+            if not force_cpu:
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        device = "cuda"
+                        logger.info(f"Loading Whisper model: {model_name} on GPU ({torch.cuda.get_device_name()})")
+                    else:
+                        device = "cpu"
+                        logger.info(f"Loading Whisper model: {model_name} on CPU (CUDA not available)")
+                except ImportError:
+                    device = "cpu"
+                    logger.info(f"Loading Whisper model: {model_name} on CPU (PyTorch not available)")
+            else:
+                device = "cpu"
+                logger.info(f"Loading Whisper model: {model_name} on CPU (force CPU mode enabled)")
+
             # Redirect whisper's logging to our logger
             import logging as whisper_logging
             whisper_logging.getLogger("whisper").setLevel(logging.WARNING)
-            
-            self.model = whisper.load_model(model_name)
-            logger.info("Model loaded successfully")
-            
+
+            self.model = whisper.load_model(model_name, device=device)
+            logger.info(f"Model loaded successfully on {device}")
+
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             raise
@@ -127,11 +146,16 @@ class WhisperTranscriber(QObject):
         if self.worker and self.worker.isRunning():
             logger.warning("Transcription already in progress")
             return
-            
+
+        # Get language setting
+        settings = Settings()
+        language = settings.get('language', 'auto')
+        lang = None if language == 'auto' else language
+
         # Emit initial progress status before starting worker
         self.transcription_progress.emit("Starting transcription...")
-            
-        self.worker = TranscriptionWorker(self.model, audio_file)
+
+        self.worker = TranscriptionWorker(self.model, audio_file, lang)
         self.worker.finished.connect(self.transcription_finished)
         self.worker.progress.connect(self.transcription_progress)
         self.worker.error.connect(self.transcription_error)

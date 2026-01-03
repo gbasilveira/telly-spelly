@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QComboBox,
                            QPushButton, QLabel)
 from PyQt6.QtCore import Qt, QTimer
 import pyaudio
-from volume_meter import VolumeMeter
+from .volume_meter import VolumeMeter
 import numpy as np
 import logging
 

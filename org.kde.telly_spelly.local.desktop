@@ -1,0 +1,27 @@
+[Desktop Entry]
+Name=Telly Spelly (Local)
+Comment=Record and transcribe audio using Whisper (local development)
+Version=1.0
+Exec=/home/konrad/gallery/telly-spelly/.venv/bin/telly-spelly
+Icon=telly-spelly
+Type=Application
+Categories=Qt;XFCE;Audio;AudioVideo;
+Terminal=false
+X-DBUS-ServiceName=org.freedesktop.telly_spelly
+
+Actions=StartRecording;StopRecording;ToggleRecording;
+
+[Desktop Action StartRecording]
+Name=Start Recording
+Exec=dbus-send --session --type=method_call --dest=org.freedesktop.telly_spelly /TellySpelly org.freedesktop.telly_spelly.StartRecording
+Icon=media-record
+
+[Desktop Action StopRecording]
+Name=Stop Recording
+Exec=dbus-send --session --type=method_call --dest=org.freedesktop.telly_spelly /TellySpelly org.freedesktop.telly_spelly.StopRecording
+Icon=media-playback-stop
+
+[Desktop Action ToggleRecording]
+Name=Toggle Recording
+Exec=dbus-send --session --type=method_call --dest=org.freedesktop.telly_spelly /TellySpelly org.freedesktop.telly_spelly.ToggleRecording
+Icon=media-record
