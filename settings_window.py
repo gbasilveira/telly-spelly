@@ -87,7 +87,21 @@ class SettingsWindow(QWidget):
         self.lang_combo.setEnabled(not auto_detect)
         self.lang_combo.currentIndexChanged.connect(self.on_language_changed)
         model_layout.addRow("Language:", self.lang_combo)
-        
+
+        # GPU / device selection
+        self.force_gpu_cb = QCheckBox("Force GPU (CUDA) acceleration")
+        force_gpu = self.settings.get('force_gpu', False)
+        self.force_gpu_cb.setChecked(force_gpu)
+        self.force_gpu_cb.toggled.connect(self.on_force_gpu_changed)
+        model_layout.addRow(self.force_gpu_cb)
+
+        # Live device status label, refreshed whenever the setting changes
+        # or a model load finishes.
+        self.device_status_label = QLabel()
+        self.device_status_label.setStyleSheet("color: #666;")
+        self._refresh_device_status()
+        model_layout.addRow("Active device:", self.device_status_label)
+
         model_group.setLayout(model_layout)
         layout.addWidget(model_group)
         
@@ -176,6 +190,32 @@ class SettingsWindow(QWidget):
         except ValueError as e:
             logger.error(f"Failed to set auto_detect: {e}")
 
+    def on_force_gpu_changed(self, checked):
+        try:
+            self.settings.set('force_gpu', checked)
+        except ValueError as e:
+            logger.error(f"Failed to set force_gpu: {e}")
+        self._refresh_device_status()
+
+    def _refresh_device_status(self):
+        """Show the device that will actually be used given the current
+        force_gpu setting and the detected hardware."""
+        from transcriber import resolve_device
+        force_gpu = self.settings.get('force_gpu', False)
+        device, fp16 = resolve_device(force_gpu=force_gpu)
+        if device == "cuda":
+            try:
+                import torch
+                gpu_name = torch.cuda.get_device_name(0)
+            except Exception:
+                gpu_name = "CUDA GPU"
+            text = f"GPU: {gpu_name} (fp16)"
+        else:
+            text = "CPU (fp32)"
+            if force_gpu:
+                text += " - GPU not available"
+        self.device_status_label.setText(text)
+
     def on_language_changed(self, index):
         language_code = self.lang_combo.currentData()
         try:
@@ -213,11 +253,17 @@ class SettingsWindow(QWidget):
     def load_model(self, model_name):
         try:
             import whisper
-            self.whisper_model = whisper.load_model(model_name)
+            from transcriber import resolve_device
+            force_gpu = self.settings.get('force_gpu', False)
+            device, fp16 = resolve_device(force_gpu=force_gpu)
+            self.whisper_model = whisper.load_model(model_name, device=device)
             self.current_model = model_name
-            self.progress_label.setText(f"Model {model_name} loaded successfully")
+            self.progress_label.setText(
+                f"Model {model_name} loaded on {device.upper()}"
+            )
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
+            self._refresh_device_status()
             self.initialization_complete.emit()
         except Exception as e:
             logger.exception("Failed to load whisper model")

@@ -32,11 +32,11 @@ class Settings:
                 return default
         elif key == 'language' and value not in self.VALID_LANGUAGES:
             return 'en'
-        elif key == 'auto_detect':
+        elif key in ('auto_detect', 'force_gpu'):
             if isinstance(value, bool):
                 return value
             return str(value).lower() in ('true', '1', 'yes')
-                
+
         return value
         
     def set(self, key, value):
@@ -49,7 +49,7 @@ class Settings:
                 raise ValueError(f"Invalid mic_index: {value}")
         elif key == 'language' and value not in self.VALID_LANGUAGES:
             raise ValueError(f"Invalid language: {value}")
-        elif key == 'auto_detect':
+        elif key in ('auto_detect', 'force_gpu'):
             value = bool(value)
                 
         self.settings.setValue(key, value)
