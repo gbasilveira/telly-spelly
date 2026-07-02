@@ -87,12 +87,14 @@ class AudioRecorder(QObject):
                 try:
                     audio_data = np.frombuffer(in_data, dtype=np.int16)
                     if len(audio_data) > 0:
-                        # Convert to float to avoid int16 overflow when squaring
-                        audio_float = audio_data.astype(np.float64)
-                        # Calculate RMS
-                        rms = np.sqrt(np.mean(audio_float**2))
-                        # Normalize to 0-1 range (32768 is max int16 amplitude)
-                        volume = min(1.0, max(0.0, rms / 32768.0))
+                        # Peak amplitude, not RMS: only peak reaches full
+                        # scale (1.0) when the signal actually clips. RMS of
+                        # even a hard-clipped waveform stays around 0.5-0.7,
+                        # so an RMS-driven meter can never show clipping.
+                        peak = float(np.max(np.abs(
+                            audio_data.astype(np.float64)
+                        ))) / 32768.0
+                        volume = min(1.0, max(0.0, peak))
                     else:
                         volume = 0.0
                     self.volume_updated.emit(volume)
