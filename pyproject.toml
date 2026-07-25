@@ -1,0 +1,31 @@
+[project]
+name = "telly-spelly"
+version = "1.0.0"
+description = "Voice-to-text transcription using OpenAI's Whisper"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "PyQt6",
+    "numpy",
+    "pyaudio",
+    "scipy",
+    "keyboard",
+    "evdev",
+    "openai-whisper",
+    # Force a Python-3.13-compatible numba/llvmlite; openai-whisper leaves
+    # numba unpinned, and the resolver otherwise drifts to ancient numba
+    # (0.53) whose llvmlite can't build on modern Python.
+    "numba>=0.60",
+]
+
+# Route torch + torchaudio to the PyTorch CUDA index so we get the
+# GPU (cu128) wheels, not the CPU-only PyPI default. Matches the local
+# NVIDIA driver/CUDA toolkit. `explicit = true` keeps every other
+# dependency resolving from plain PyPI.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }

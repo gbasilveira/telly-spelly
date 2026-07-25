@@ -26,61 +26,63 @@ cd telly-spelly
 python3 install.py
 ```
 
-The installer will:
-- Create a virtual environment with `--system-site-packages` (to access system whisper/torch)
-- Install additional Python dependencies (PyQt6, numpy, scipy, etc.)
-- Set up the application in your user directory
-- Create desktop entries and icons
-- Configure the launcher
+The installer uses [uv](https://astral.sh/uv) to:
+- Build a locked virtual environment from `uv.lock` (pinned Python + dependencies, including `torch` and `openai-whisper`)
+- Wire the app into `~/.local` (launcher, desktop entry, icon)
+
+Because uv manages its own Python interpreter and all dependencies are
+pinned in `uv.lock`, the install is insulated from system Python upgrades.
 
 ## Prerequisites
 
 ### System Requirements
-- Python 3.11+ 
+- [uv](https://astral.sh/uv) (manages Python + dependencies)
 - KDE Plasma desktop environment
 - PortAudio (for audio recording)
 - CUDA-capable GPU (optional, for faster transcription)
 
-### 1. System Packages
+### 1. uv
+
+Install uv (see https://docs.astral.sh/uv/getting-started/installation/):
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### 2. System Packages
+
+pyaudio builds against PortAudio:
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt install python3-pyaudio portaudio19-dev python3-pip
+sudo apt install portaudio19-dev
 ```
 
 **Fedora:**
 ```bash
-sudo dnf install python3-pyaudio portaudio-devel python3-pip
+sudo dnf install portaudio-devel
 ```
-
-### 2. OpenAI Whisper (System-wide)
-
-This application requires OpenAI Whisper and PyTorch to be installed **system-wide** (not in a virtual environment). The app's venv uses `--system-site-packages` to access these.
-
-```bash
-# Install whisper and torch system-wide
-sudo pip install openai-whisper torch --break-system-packages
-```
-
-> **Note:** The `--break-system-packages` flag is required on modern Debian/Ubuntu systems due to PEP 668. This is safe for these specific packages.
 
 ### 3. GPU Acceleration (Optional but Recommended)
 
 For significantly faster transcription, install NVIDIA drivers:
-
-**Ubuntu:**
 ```bash
 sudo apt install nvidia-driver-580-open
 sudo reboot
 ```
 
-Verify GPU is available:
+Verify the GPU is visible:
 ```bash
 nvidia-smi
-python3 -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 ```
 
-Without GPU, whisper will use CPU (slower but functional).
+torch is installed automatically **with CUDA support** by `uv sync` — the
+PyTorch CUDA wheel index is configured in `pyproject.toml`. After
+installing, verify CUDA is available:
+```bash
+.venv/bin/python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+```
+
+Without a GPU, Whisper runs on CPU (slower but functional).
 
 ### 4. Global Shortcuts (Input Group)
 
